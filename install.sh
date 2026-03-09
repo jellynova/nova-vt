@@ -5,8 +5,8 @@ echo "=== nova-vt installer ==="
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "[1/5] Installing system packages..."
-sudo pacman -S --needed --noconfirm \
-    godot obs-studio v4l2loopback-dkms python python-pip git
+yay -S --needed --noconfirm \
+    godot obs-studio v4l2loopback-dkms obs-v4l2sink python python-pip git
 
 echo "[2/5] Loading v4l2loopback..."
 sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="nova-vt-cam" exclusive_caps=1
