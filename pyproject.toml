@@ -12,11 +12,13 @@ dependencies = [
     "google-auth-oauthlib",
     "websockets",
     "pytest",
+    "PyQt6",
 ]
 
 [project.scripts]
 nova-vt = "orchestrator.main:main"
 nova-tracker = "tracker.main:main"
+nova-vt-dashboard = "dashboard.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]
