@@ -9,3 +9,5 @@ client_secrets.json
 .worktrees/
 *.egg-info/
 face_landmarker.task
+avatar/.godot/
+avatar/*.import
