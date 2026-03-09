@@ -10,20 +10,22 @@ from dashboard.components.base import ComponentStatus
 from dashboard.camera import WebcamWorker, AvatarCameraWorker
 
 
-_STATUS_STYLE = {
-    ComponentStatus.RUNNING:        ("●", "#a6e3a1"),
-    ComponentStatus.STOPPED:        ("●", "#6c7086"),
-    ComponentStatus.NOT_CONFIGURED: ("●", "#f9e2af"),
-    ComponentStatus.ERROR:          ("●", "#f38ba8"),
-    ComponentStatus.CONNECTING:     ("◌", "#89b4fa"),
-}
+def _status_style(theme):
+    return {
+        ComponentStatus.RUNNING:        ("●", theme.success),
+        ComponentStatus.STOPPED:        ("●", theme.text_muted),
+        ComponentStatus.NOT_CONFIGURED: ("●", theme.warning),
+        ComponentStatus.ERROR:          ("●", theme.error),
+        ComponentStatus.CONNECTING:     ("◌", theme.secondary),
+    }
 
 _SCENES = ["Gameplay", "Just Chatting", "BRB", "Starting Soon"]
 
 
 class StatusPill(QFrame):
-    def __init__(self, name: str, parent=None):
+    def __init__(self, name: str, status_style: dict, parent=None):
         super().__init__(parent)
+        self._status_style = status_style
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -39,7 +41,7 @@ class StatusPill(QFrame):
         self.update_status(ComponentStatus.STOPPED)
 
     def update_status(self, status: ComponentStatus, message: str = ""):
-        dot, color = _STATUS_STYLE[status]
+        dot, color = self._status_style[status]
         self._dot.setText(dot)
         self._dot.setStyleSheet(f"color: {color};")
         self._msg.setText(f"({message})" if message else "")
@@ -93,15 +95,16 @@ class NovaVTWindow(QMainWindow):
         cam_row.addWidget(self._avatar_pane)
         root.addLayout(cam_row, stretch=4)
 
-        # --- Status pills ---
+        # --- Status pills (theme-aware colors) ---
+        ss = _status_style(theme)
         pills_row = QHBoxLayout()
         self._pills = {
-            "tracker":  StatusPill("Tracker"),
-            "godot":    StatusPill("Godot"),
-            "obs":      StatusPill("OBS"),
-            "twitch":   StatusPill("Twitch"),
-            "youtube":  StatusPill("YouTube"),
-            "overlays": StatusPill("Overlays"),
+            "tracker":  StatusPill("Tracker",  ss),
+            "godot":    StatusPill("Godot",    ss),
+            "obs":      StatusPill("OBS",      ss),
+            "twitch":   StatusPill("Twitch",   ss),
+            "youtube":  StatusPill("YouTube",  ss),
+            "overlays": StatusPill("Overlays", ss),
         }
         for pill in self._pills.values():
             pills_row.addWidget(pill)
@@ -191,4 +194,5 @@ class NovaVTWindow(QMainWindow):
         self._webcam.stop()
         self._avatar_cam.stop()
         self._on_stop()
+        self._overlay.stop_overlays()
         super().closeEvent(event)

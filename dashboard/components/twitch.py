@@ -43,6 +43,7 @@ class TwitchWorker(ComponentWorker):
         self._channel = channel
         self._client_id = client_id
         self._bot = None
+        self._bot_loop: asyncio.AbstractEventLoop | None = None
         self._bot_thread: threading.Thread | None = None
 
     def check_config(self):
@@ -109,6 +110,9 @@ class TwitchWorker(ComponentWorker):
         self._emit_status(ComponentStatus.CONNECTING, f"#{self._channel}")
 
         def _run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._bot_loop = loop
             try:
                 bot = TwitchBot(
                     token=self._token,
@@ -116,16 +120,19 @@ class TwitchWorker(ComponentWorker):
                     on_alert=on_alert,
                 )
                 self._bot = bot
-                asyncio.run(bot.start())
+                self._emit_status(ComponentStatus.RUNNING, f"#{self._channel}")
+                loop.run_until_complete(bot.start())
             except Exception as e:
                 self._emit_status(ComponentStatus.ERROR, str(e))
+            finally:
+                self._bot_loop = None
 
         self._bot_thread = threading.Thread(target=_run, daemon=True)
         self._bot_thread.start()
-        self._emit_status(ComponentStatus.RUNNING, f"#{self._channel}")
 
     def stop_bot(self):
-        if self._bot:
-            asyncio.run(self._bot.close())
-            self._bot = None
+        if self._bot and self._bot_loop:
+            asyncio.run_coroutine_threadsafe(self._bot.close(), self._bot_loop)
+        self._bot = None
+        self._bot_loop = None
         self._emit_status(ComponentStatus.STOPPED)
