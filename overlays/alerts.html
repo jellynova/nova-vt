@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="alert-box" id="alerts"></div>
+    <script>
+        const box = document.getElementById('alerts');
+
+        const ws = new WebSocket('ws://localhost:7777/alerts');
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            const alertEl = document.createElement('div');
+            alertEl.className = 'alert';
+            alertEl.textContent = data.text;
+            box.appendChild(alertEl);
+            setTimeout(() => alertEl.remove(), 4000);
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: transparent; font-family: 'Segoe UI', sans-serif; }
+
+.chat-box {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    width: 380px;
+    max-height: 300px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 6px;
+}
+
+.chat-message {
+    background: rgba(0,0,0,0.7);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: white;
+    font-size: 14px;
+    animation: slide-in 0.2s ease;
+}
+
+.chat-message .username {
+    font-weight: bold;
+    color: #c084fc;
+}
+
+.alert-box {
+    position: fixed;
+    top: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+}
+
+.alert {
+    background: linear-gradient(135deg, #7c3aed, #c084fc);
+    color: white;
+    border-radius: 12px;
+    padding: 16px 32px;
+    font-size: 22px;
+    font-weight: bold;
+    box-shadow: 0 4px 20px rgba(124,58,237,0.5);
+    animation: alert-pop 4s forwards;
+}
+
+@keyframes slide-in {
+    from { opacity: 0; transform: translateX(-20px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes alert-pop {
+    0%   { opacity: 0; transform: scale(0.8); }
+    10%  { opacity: 1; transform: scale(1.05); }
+    20%  { transform: scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+}

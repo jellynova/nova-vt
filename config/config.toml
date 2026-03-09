@@ -1,0 +1,29 @@
+[tracker]
+camera_index = 0
+fps = 30
+osc_host = "127.0.0.1"
+osc_port = 9000
+
+[avatar]
+vrm_path = "avatar/avatar.vrm"
+osc_port = 9000
+virtual_camera_device = "/dev/video10"
+
+[obs]
+host = "localhost"
+port = 4455
+# password stored in config/secrets.toml
+
+[obs.sources]
+avatar_source = "Godot Avatar"
+game_source = "Pokopia"
+
+[stream]
+twitch_channel = "your_twitch_channel"
+# credentials in config/secrets.toml
+
+[scenes]
+gameplay = "Gameplay"
+just_chatting = "Just Chatting"
+brb = "BRB"
+starting_soon = "Starting Soon"
