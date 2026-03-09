@@ -81,10 +81,12 @@ func _load_avatar() -> void:
 func _index_morphs(root: Node) -> void:
 	for node in _collect_typed(root, "MeshInstance3D"):
 		var mesh := node as MeshInstance3D
+		if not mesh.mesh:
+			continue
 		var count := mesh.get_blend_shape_count()
 		for i in count:
-			var name := mesh.get_blend_shape_name(i).to_lower()
-			_morph_map[name] = [_meshes.size(), i]
+			var shape_name := mesh.mesh.get_blend_shape_name(i).to_lower()
+			_morph_map[shape_name] = [_meshes.size(), i]
 		_meshes.append(mesh)
 
 
