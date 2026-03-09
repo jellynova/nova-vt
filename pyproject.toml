@@ -12,6 +12,7 @@ dependencies = [
     "google-auth-oauthlib",
     "websockets",
     "pytest",
+    "pytest-qt",
     "PyQt6",
 ]
 
@@ -26,4 +27,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tracker*", "orchestrator*"]
+include = ["tracker*", "orchestrator*", "dashboard*"]
