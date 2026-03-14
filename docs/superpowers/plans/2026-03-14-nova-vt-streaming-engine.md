@@ -1838,7 +1838,7 @@ class TwitchChatProvider:
             return
         while self._pending_sends:
             text = self._pending_sends.pop(0)
-            asyncio.ensure_future(self._async_send(text), loop=self._loop)
+            self._loop.call_soon_threadsafe(self._loop.create_task, self._async_send(text))
 
     async def _async_send(self, text: str) -> None:
         if self._client is None:
