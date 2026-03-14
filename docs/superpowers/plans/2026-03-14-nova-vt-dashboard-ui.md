@@ -1717,6 +1717,8 @@ class SettingsDialog(QDialog):
 
     def _populate_audio_devices(self) -> None:
         self._monitor_device_combo.clear()
+        if sounddevice is None:
+            return
         try:
             devices = sounddevice.query_devices()
             for dev in devices:
@@ -1845,18 +1847,17 @@ def test_scene_editor_items_have_correct_positions(qapp, qtbot):
 
 
 def test_scene_editor_accept_writes_back_scene(qapp, qtbot):
+    from nova_vt.dashboard.scene_editor import _SCALE
     dialog = make_dialog(qtbot)
-    # Move an item and accept
-    items = list(dialog._gscene.items())
-    items[0].setPos(100, 200)
+    # Move the first _items entry (capture layer, initially at source origin 0,0)
+    # by a known number of canvas pixels, then verify the source-coord rect updates.
+    item = dialog._items[0]
+    dx_canvas, dy_canvas = 80.0, 45.0
+    item.setPos(dx_canvas, dy_canvas)
     result = dialog.get_updated_scene()
-    # At least one layer rect should reflect the moved position
-    moved = False
-    for layer in result["layers"]:
-        if layer["rect"][0] == 100 and layer["rect"][1] == 200:
-            moved = True
-            break
-    assert moved
+    layer = result["layers"][0]
+    assert layer["rect"][0] == int(dx_canvas / _SCALE)
+    assert layer["rect"][1] == int(dy_canvas / _SCALE)
 
 
 def test_scene_editor_preserves_layer_types(qapp, qtbot):
@@ -1944,7 +1945,8 @@ class _LayerItem(QGraphicsRectItem):
 
     def __init__(self, layer: dict[str, Any]) -> None:
         x, y, w, h = layer["rect"]
-        super().__init__(QRectF(x * _SCALE, y * _SCALE, w * _SCALE, h * _SCALE))
+        super().__init__(QRectF(0.0, 0.0, w * _SCALE, h * _SCALE))
+        self.setPos(x * _SCALE, y * _SCALE)
         self._layer = layer
         layer_type = layer.get("type", "image")
         fill = QColor(_LAYER_COLORS.get(layer_type, "#2d2d4e"))
@@ -1969,8 +1971,8 @@ class _LayerItem(QGraphicsRectItem):
         """Return updated layer dict with rect reflecting current canvas position."""
         pos = self.pos()
         r = self.rect()
-        x = int((r.x() + pos.x()) / _SCALE)
-        y = int((r.y() + pos.y()) / _SCALE)
+        x = int(pos.x() / _SCALE)
+        y = int(pos.y() / _SCALE)
         w = int(r.width() / _SCALE)
         h = int(r.height() / _SCALE)
         updated = dict(self._layer)
@@ -2182,12 +2184,14 @@ def test_main_window_live_indicator_hidden_when_idle(qapp, qtbot):
 
 
 def test_main_window_end_stream_transitions_to_idle(qapp, qtbot):
-    window, _ = make_window(qtbot)
+    window, fns = make_window(qtbot)
     window.show()
     qtbot.mouseClick(window._preview_btn, Qt.MouseButton.LeftButton)
     qtbot.mouseClick(window._go_live_btn, Qt.MouseButton.LeftButton)
     window._on_end_stream()
     assert window.state == StreamState.IDLE
+    fns["end_stream"].assert_called_once()
+    fns["stop_preview"].assert_called_once()
 
 
 def test_main_window_calls_start_preview_fn(qapp, qtbot):
@@ -2466,6 +2470,7 @@ class MainWindow(QMainWindow):
     def _on_end_stream(self) -> None:
         self._stream_clock.stop()
         self._end_stream_fn()
+        self._stop_preview_fn()  # full teardown: encoder + preview threads
         self.state = StreamState.IDLE
         self._apply_state()
 
