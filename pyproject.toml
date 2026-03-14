@@ -1,25 +1,27 @@
 [project]
 name = "nova-vt"
-version = "0.1.0"
-requires-python = ">=3.11"
+version = "0.2.0"
+requires-python = ">=3.12"
 dependencies = [
+    "PyQt6",
+    "moderngl",
+    "pygltflib",
     "mediapipe",
     "opencv-python",
-    "python-osc",
-    "obsws-python",
+    "numpy",
+    "sounddevice",
+    "tomli-w",
     "twitchio",
     "google-api-python-client",
     "google-auth-oauthlib",
-    "websockets",
-    "pytest",
-    "pytest-qt",
-    "PyQt6",
+    "TikTokLive",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "pytest-qt"]
+
 [project.scripts]
-nova-vt = "orchestrator.main:main"
-nova-tracker = "tracker.main:main"
-nova-vt-dashboard = "dashboard.main:main"
+nova-vt = "nova_vt.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -27,4 +29,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["tracker*", "orchestrator*", "dashboard*"]
+include = ["nova_vt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
