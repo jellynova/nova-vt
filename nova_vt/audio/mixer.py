@@ -135,11 +135,12 @@ class AudioMixer(QThread):
             game_stream = sd.InputStream(samplerate=sr, channels=ch, blocksize=bs,
                                          dtype="float32", callback=_game_cb,
                                          device=cfg.game_config.device)
+            silence = np.zeros((bs, ch), dtype=np.float32)
             with mic_stream, game_stream:
                 while not self._stop_event.is_set():
-                    mic = _mic_buf[0] if _mic_buf[0] is not None else np.zeros((bs, ch), dtype=np.float32)
-                    game = _game_buf[0] if _game_buf[0] is not None else np.zeros((bs, ch), dtype=np.float32)
-                    bgm = np.zeros((bs, ch), dtype=np.float32)
+                    mic = _mic_buf[0] if _mic_buf[0] is not None else silence
+                    game = _game_buf[0] if _game_buf[0] is not None else silence
+                    bgm = silence  # BGM file playback: future work
                     self._mix_and_enqueue(mic, game, bgm)
                     self._stop_event.wait(bs / sr)
         except Exception as exc:

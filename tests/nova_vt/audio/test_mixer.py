@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import queue
-import time
-import unittest.mock as mock
 
 import numpy as np
 import pytest
