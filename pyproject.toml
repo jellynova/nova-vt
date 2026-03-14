@@ -33,3 +33,6 @@ include = ["nova_vt*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-k not slow')",
+]
