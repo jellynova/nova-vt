@@ -292,18 +292,21 @@ class Config:
     def _write_secrets_atomic(self, data: bytes) -> None:
         """Write secrets.toml atomically with mode 0o600.
 
-        Uses os.open so the file is created with the correct mode from the
-        start — avoids the world-readable window that write_bytes + chmod has.
+        Uses a tempfile + os.replace so the file is never world-readable,
+        and tracks the fd close state to avoid a double-close on error.
         """
         import tempfile
         tmp_fd, tmp_path = tempfile.mkstemp(dir=self._dir, suffix=".tmp")
+        fd_closed = False
         try:
             os.write(tmp_fd, data)
             os.close(tmp_fd)
+            fd_closed = True
             os.chmod(tmp_path, 0o600)
             os.replace(tmp_path, self._secrets_path)
         except Exception:
-            os.close(tmp_fd)
+            if not fd_closed:
+                os.close(tmp_fd)
             try:
                 os.unlink(tmp_path)
             except OSError:
@@ -983,7 +986,8 @@ def test_renderer_produces_rgba_frame():
     assert not preview_q.empty(), "renderer did not produce any frames"
     frame = preview_q.get_nowait()
     assert isinstance(frame, np.ndarray)
-    assert frame.shape == (108, 192, 4)
+    # Renderer pushes arr[::2, ::2] (half-res) to preview_queue
+    assert frame.shape == (54, 96, 4), f"Expected (54, 96, 4) half-res preview, got {frame.shape}"
     assert frame.dtype == np.uint8
 
 
@@ -1921,7 +1925,8 @@ def test_compositor_produces_frames():
 
     assert not preview_q.empty(), "compositor produced no frames"
     frame = preview_q.get_nowait()
-    assert frame.shape == (108, 192, 4)
+    # Compositor pushes canvas[::2, ::2] (half-res) to preview_queue
+    assert frame.shape == (54, 96, 4), f"Expected (54, 96, 4) half-res preview, got {frame.shape}"
 
 
 def test_compositor_stop_is_clean():
