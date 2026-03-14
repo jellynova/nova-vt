@@ -70,7 +70,7 @@ class TestTikTokChatProvider:
         assert m.event_type == "gift"
         assert m.username == "GiftSender"
 
-    def test_handle_subscribe_event_fires_callback(self):
+    def test_handle_follow_event_fires_callback(self):
         provider = self._make_provider()
         received: list[ChatMessage] = []
         provider.on_message(lambda m: received.append(m))
@@ -78,10 +78,10 @@ class TestTikTokChatProvider:
         fake_event = mock.MagicMock()
         fake_event.user.nickname = "NewFollower"
 
-        provider._handle_subscribe(fake_event)
+        provider._handle_follow(fake_event)
 
         assert len(received) == 1
-        assert received[0].event_type == "sub"
+        assert received[0].event_type == "follow"
         assert received[0].username == "NewFollower"
 
     def test_handle_chat_no_callback_does_not_raise(self):

@@ -66,7 +66,7 @@ class TikTokChatProvider:
             )
         )
 
-    def _handle_subscribe(self, event) -> None:
+    def _handle_follow(self, event) -> None:
         if self._message_callback is None:
             return
         self._message_callback(
@@ -75,7 +75,7 @@ class TikTokChatProvider:
                 username=event.user.nickname,
                 color=self._TIKTOK_COLOR,
                 text="",
-                event_type="sub",
+                event_type="follow",
             )
         )
 
@@ -107,7 +107,7 @@ class TikTokChatProvider:
 
         @client.on(FollowEvent)
         async def on_follow(event: FollowEvent) -> None:
-            provider_ref._handle_subscribe(event)
+            provider_ref._handle_follow(event)
 
         try:
             self._loop.run_until_complete(client.start())
