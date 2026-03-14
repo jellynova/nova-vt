@@ -58,6 +58,8 @@ class TestEncoderConfig:
         assert FIFO_AUDIO in args
         assert "rawvideo" in args
         assert "s16le" in args
+        assert "libx264" in args
+        assert "aac" in args
         tee_idx = [i for i, a in enumerate(args) if a == "-f" and i+1 < len(args) and args[i+1] == "tee"]
         assert len(tee_idx) >= 1
 
