@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-import pygltflib
 
 # Mapping from VRM 0.x BlendShapeProxy preset names → ARKit names
 _VRM0_TO_ARKIT: dict[str, str] = {
@@ -52,6 +51,7 @@ class VRMLoader:
     """Loads a VRM 0.x or 1.0 file and exposes mesh, skin, and expression data."""
 
     def __init__(self, path: Path) -> None:
+        import pygltflib  # lazy — only needed when a VRM file is actually loaded
         self._path = path
         self._gltf = pygltflib.GLTF2().load(str(path))
         self.meshes: list[MeshData] = []
@@ -101,7 +101,7 @@ class VRMLoader:
                 bind = data["morphTargetBinds"][0]
                 self.expression_map[arkit] = bind.get("index", 0)
 
-    def _load_primitive(self, prim: pygltflib.Primitive) -> MeshData:
+    def _load_primitive(self, prim) -> MeshData:
         positions = self._accessor_to_numpy(prim.attributes.POSITION)
         normals_acc = getattr(prim.attributes, "NORMAL", None)
         normals = self._accessor_to_numpy(normals_acc) if normals_acc is not None else np.zeros_like(positions)
@@ -124,7 +124,7 @@ class VRMLoader:
             morph_names=morph_names,
         )
 
-    def _load_skin(self, skin: pygltflib.Skin) -> SkinData:
+    def _load_skin(self, skin) -> SkinData:
         gltf = self._gltf
         bone_names = []
         for j in skin.joints or []:

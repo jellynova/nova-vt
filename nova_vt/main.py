@@ -311,14 +311,13 @@ def main() -> None:
     compositor = Compositor(preview_queue=preview_queue, fps=30)
 
     # ── VRM Renderer (optional — requires a configured VRM path) ─────────
-    from nova_vt.renderer.vrm_loader import VRMLoader
-    from nova_vt.renderer.vrm_renderer import VRMRenderer
-
     vrm_path = config.get("renderer", "vrm_path") or ""
-    _vrm_renderer: list[VRMRenderer] = []
+    _vrm_renderer: list[Any] = []
 
     if vrm_path and Path(vrm_path).exists():
         try:
+            from nova_vt.renderer.vrm_loader import VRMLoader
+            from nova_vt.renderer.vrm_renderer import VRMRenderer
             loader = VRMLoader(vrm_path)
             renderer = VRMRenderer(
                 loader=loader,
