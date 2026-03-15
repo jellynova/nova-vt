@@ -17,7 +17,14 @@ active scene the compositor falls back to a full-canvas webcam display.
 from __future__ import annotations
 
 import json
+import logging
 import queue
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 import sys
 import time
 import tomllib
@@ -316,27 +323,9 @@ def main() -> None:
     preview_queue: queue.Queue = queue.Queue(maxsize=4)
     compositor = Compositor(preview_queue=preview_queue, fps=30)
 
-    # ── VRM Renderer (optional — requires a configured VRM path) ─────────
-    vrm_path = config.get("renderer", "vrm_path") or ""
+    # ── VRM Renderer (optional — initialised lazily in start_preview) ───
     _vrm_renderer: list[Any] = []
-
-    if vrm_path and Path(vrm_path).exists():
-        try:
-            from nova_vt.renderer.vrm_loader import VRMLoader
-            from nova_vt.renderer.vrm_renderer import VRMRenderer
-            loader = VRMLoader(vrm_path)
-            renderer = VRMRenderer(
-                loader=loader,
-                # Push to compositor's avatar_queue instead of preview_queue directly
-                preview_queue=compositor.avatar_queue,
-                fps=30,
-            )
-            _vrm_renderer.append(renderer)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning(
-                "VRM renderer init failed (%s) — avatar disabled", exc
-            )
+    _config_vrm_path = config.get("renderer", "vrm_path") or ""
 
     # ── Webcam capture ───────────────────────────────────────────────────
     from nova_vt.capture.webcam import WebcamCaptureThread
@@ -362,7 +351,42 @@ def main() -> None:
 
     # ── Callbacks ────────────────────────────────────────────────────────
 
+    def _init_vrm_renderer(scene_data: dict) -> None:
+        """Try to initialise VRM renderer from config path or scene avatar layers."""
+        if _vrm_renderer:
+            return  # already running
+
+        # Prefer the config-level vrm_path; fall back to first avatar layer with one
+        candidate = _config_vrm_path or next(
+            (
+                l.get("vrm_path", "")
+                for l in scene_data.get("layers", [])
+                if l.get("type") == "avatar" and l.get("vrm_path")
+            ),
+            "",
+        )
+        if not candidate or not Path(candidate).exists():
+            logging.getLogger(__name__).info("No VRM path found — avatar renderer disabled")
+            return
+        try:
+            from nova_vt.renderer.vrm_loader import VRMLoader
+            from nova_vt.renderer.vrm_renderer import VRMRenderer
+            loader = VRMLoader(candidate)
+            renderer = VRMRenderer(
+                loader=loader,
+                preview_queue=compositor.avatar_queue,
+                fps=30,
+            )
+            _vrm_renderer.append(renderer)
+            logging.getLogger(__name__).info("VRM renderer ready: %s", candidate)
+        except Exception as exc:
+            logging.getLogger(__name__).warning("VRM renderer init failed (%s)", exc)
+
     def start_preview() -> None:
+        # Load scene so we can extract the VRM path from avatar layers if needed
+        scene = _load_scene_data(_active_scene[0], camera_device)
+        compositor.set_scene(scene)
+
         # Webcam → compositor.webcam_queue (not preview_queue directly)
         t = WebcamCaptureThread(
             frame_queue=compositor.webcam_queue,
@@ -371,6 +395,9 @@ def main() -> None:
         _webcam.clear()
         _webcam.append(t)
         t.start()
+
+        # VRM renderer — initialise now so scene avatar layers can provide the path
+        _init_vrm_renderer(scene)
 
         # MediaPipe tracker → VRM renderer (if available)
         if _vrm_renderer:
@@ -397,6 +424,7 @@ def main() -> None:
         if _vrm_renderer:
             _vrm_renderer[0].stop()
             _vrm_renderer[0].wait()
+            _vrm_renderer.clear()
         compositor.stop()
         compositor.wait()
         mixer.stop_mixing()

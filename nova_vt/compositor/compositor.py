@@ -129,6 +129,11 @@ class Compositor(QThread):
 
     def set_scene(self, scene_data: dict[str, Any]) -> None:
         """Swap the active scene (thread-safe, takes effect on next frame)."""
+        layers = scene_data.get("layers", [])
+        _log.info("Compositor scene set: %r (%d layers: %s)",
+                  scene_data.get("name", "?"),
+                  len(layers),
+                  [l.get("type") for l in layers])
         with self._scene_lock:
             self._scene_data = scene_data
 
@@ -153,10 +158,28 @@ class Compositor(QThread):
 
     def _composite_loop(self) -> None:
         frame_time = 1.0 / self._fps
+        _tick = 0
+        _log.info("Compositor started (scene: %r, layers: %d)",
+                  self._scene_data.get("name", "?"),
+                  len(self._scene_data.get("layers", [])))
         while not self._stop.is_set():
             t0 = time.perf_counter()
 
             self._drain_sources()
+
+            # Log once per second so terminal shows compositor is alive
+            if _tick % self._fps == 0:
+                with self._scene_lock:
+                    ltypes = [l.get("type", "?") for l in self._scene_data.get("layers", [])]
+                _log.debug(
+                    "Compositor tick %d | scene layers: %s | webcam=%s avatar=%s",
+                    _tick,
+                    ltypes,
+                    self._webcam_frame is not None,
+                    self._avatar_frame is not None,
+                )
+            _tick += 1
+
             canvas = self._composite()
 
             # Half-res preview (960×540 for 1920×1080 source)
@@ -233,7 +256,8 @@ class Compositor(QThread):
                     render_avatar(canvas, self._avatar_frame, rect)
 
             elif ltype == "image":
-                src = layer.get("src", "")
+                # scene editor saves "path"; accept both for compatibility
+                src = layer.get("src") or layer.get("path", "")
                 if src:
                     render_image(canvas, src, rect)
 

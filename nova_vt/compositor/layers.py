@@ -115,7 +115,8 @@ def render_text(
         _log.warning("compositor: Pillow not installed — text layers skipped")
         return
 
-    text = layer.get("text", "")
+    # scene editor saves "content"; accept both for compatibility
+    text = layer.get("text") or layer.get("content", "")
     if not text:
         return
 
