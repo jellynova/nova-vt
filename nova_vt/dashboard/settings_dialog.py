@@ -40,6 +40,7 @@ class SettingsDialog(QDialog):
 
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_model_tab(), "Avatar Model")
+        self._tabs.addTab(self._build_camera_tab(), "Camera")
         self._tabs.addTab(self._build_twitch_tab(), "Twitch")
         self._tabs.addTab(self._build_youtube_tab(), "YouTube")
         self._tabs.addTab(self._build_tiktok_tab(), "TikTok")
@@ -86,6 +87,27 @@ class SettingsDialog(QDialog):
         )
         if path:
             self._vrm_path.setText(path)
+
+    def _build_camera_tab(self) -> QWidget:
+        import glob
+        w = QWidget()
+        form = QFormLayout(w)
+
+        self._camera_device_combo = QComboBox()
+        devices = sorted(glob.glob("/dev/video*"))
+        if not devices:
+            devices = ["/dev/video0"]
+        for dev in devices:
+            self._camera_device_combo.addItem(dev)
+        form.addRow("Camera Device:", self._camera_device_combo)
+
+        note = QLabel(
+            "Select the V4L2 camera device for webcam capture and face/body tracking.\n"
+            "If the preview is blank, try switching to a different device (e.g. /dev/video2)."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+        return w
 
     def _build_twitch_tab(self) -> QWidget:
         w = QWidget()
@@ -198,6 +220,17 @@ class SettingsDialog(QDialog):
         # Avatar model
         self._vrm_path.setText(self._config.get("renderer", "vrm_path") or "")
 
+        # Camera
+        saved_cam = self._config.get("camera", "device") or ""
+        if saved_cam:
+            idx = self._camera_device_combo.findText(saved_cam)
+            if idx >= 0:
+                self._camera_device_combo.setCurrentIndex(idx)
+            else:
+                # Device saved but not in current list — add it
+                self._camera_device_combo.insertItem(0, saved_cam)
+                self._camera_device_combo.setCurrentIndex(0)
+
         # Twitch
         self._twitch_channel.setText(self._config.get("twitch", "channel") or "")
         self._twitch_client_id.setText(self._config.get_secret("twitch", "client_id") or "")
@@ -225,6 +258,9 @@ class SettingsDialog(QDialog):
     def _save(self) -> None:
         # Avatar model
         self._config.set("renderer", "vrm_path", self._vrm_path.text())
+
+        # Camera
+        self._config.set("camera", "device", self._camera_device_combo.currentText())
 
         # Twitch (credentials in secrets)
         self._config.set("twitch", "channel", self._twitch_channel.text())

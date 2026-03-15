@@ -45,6 +45,48 @@ _log = logging.getLogger(__name__)
 _DEFAULT_W = 1920
 _DEFAULT_H = 1080
 
+# Cached "No signal" placeholder — generated once on first use
+_NO_SIGNAL_CACHE: dict[tuple[int, int], np.ndarray] = {}
+
+
+def _no_signal_frame(width: int, height: int) -> np.ndarray:
+    """Return a dark-grey RGBA placeholder with centred 'No Signal' text."""
+    key = (width, height)
+    if key in _NO_SIGNAL_CACHE:
+        return _NO_SIGNAL_CACHE[key]
+
+    canvas = np.full((height, width, 4), (30, 30, 40, 255), dtype=np.uint8)
+
+    # Draw centred text with Pillow if available, otherwise skip
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        img = Image.fromarray(canvas, mode="RGBA")
+        draw = ImageDraw.Draw(img)
+        font_size = max(24, height // 18)
+        font = ImageFont.load_default()
+        for fp in (
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ):
+            try:
+                font = ImageFont.truetype(fp, font_size)
+                break
+            except Exception:
+                continue
+
+        text = "No Signal\nOpen Settings (\u2699) \u2192 Camera to select a device"
+        bbox = draw.multiline_textbbox((0, 0), text, font=font)
+        tx = (width - (bbox[2] - bbox[0])) // 2
+        ty = (height - (bbox[3] - bbox[1])) // 2
+        draw.multiline_text((tx, ty), text, font=font, fill=(160, 160, 180, 255), align="center")
+        canvas = np.array(img, dtype=np.uint8)
+    except Exception:
+        pass  # Pillow not installed — plain dark slate is fine
+
+    _NO_SIGNAL_CACHE[key] = canvas
+    return canvas
+
 
 class Compositor(QThread):
     """Alpha-compositing engine that merges webcam + avatar + overlay layers.
@@ -160,13 +202,16 @@ class Compositor(QThread):
             )
 
         if not layers:
-            # No scene configured — show raw webcam feed at full canvas size
+            # No scene configured — show raw webcam feed at full canvas size,
+            # or a "No signal" placeholder if no frame has arrived yet.
             if self._webcam_frame is not None:
                 frame = self._webcam_frame
                 if frame.ndim == 3 and frame.shape[2] == 3:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
                 resized = cv2.resize(frame, (self._width, self._height), interpolation=cv2.INTER_LINEAR)
                 canvas[:] = resized
+            else:
+                canvas[:] = _no_signal_frame(self._width, self._height)
             return canvas
 
         for layer in layers:

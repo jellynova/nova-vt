@@ -21,17 +21,22 @@ class WebcamCaptureThread(threading.Thread):
     Frames are HxWx4 RGBA uint8 arrays sized (_PREVIEW_H, _PREVIEW_W, 4).
     The queue is filled with put_nowait; full queue frames are silently dropped
     so the preview always shows the latest frame without backing up.
+
+    *device* may be either an integer index (0, 1, …) or a V4L2 device path
+    string such as "/dev/video2".
     """
 
     def __init__(
         self,
         frame_queue: queue.Queue,
-        camera_index: int = 0,
+        device: "int | str" = 0,
+        # Legacy alias kept for callers that still use camera_index= kwarg
+        camera_index: "int | None" = None,
         fps: int = 30,
     ) -> None:
         super().__init__(daemon=True, name="WebcamCaptureThread")
         self._queue = frame_queue
-        self._camera_index = camera_index
+        self._device: int | str = camera_index if camera_index is not None else device
         self._fps = fps
         self._stop_event = threading.Event()
 
@@ -39,15 +44,15 @@ class WebcamCaptureThread(threading.Thread):
         self._stop_event.set()
 
     def run(self) -> None:
-        cap = cv2.VideoCapture(self._camera_index)
+        cap = cv2.VideoCapture(self._device)
         if not cap.isOpened():
-            _log.error("WebcamCaptureThread: could not open camera index %d", self._camera_index)
+            _log.error("WebcamCaptureThread: could not open camera %r", self._device)
             return
 
         cap.set(cv2.CAP_PROP_FPS, self._fps)
         interval = 1.0 / self._fps
 
-        _log.info("WebcamCaptureThread: started (camera %d, %d fps)", self._camera_index, self._fps)
+        _log.info("WebcamCaptureThread: started (device=%r, %d fps)", self._device, self._fps)
 
         try:
             while not self._stop_event.wait(timeout=interval):

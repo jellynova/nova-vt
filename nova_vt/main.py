@@ -335,7 +335,12 @@ def main() -> None:
     # ── Webcam capture ───────────────────────────────────────────────────
     from nova_vt.capture.webcam import WebcamCaptureThread
 
-    camera_index = int(config.get("tracker", "camera_index") or 0)
+    # Camera device: prefer the explicit device path from [camera] section,
+    # fall back to legacy [tracker] camera_index integer for compatibility.
+    camera_device: str | int = (
+        config.get("camera", "device")
+        or int(config.get("tracker", "camera_index") or 0)
+    )
     _webcam: list[WebcamCaptureThread] = []
 
     # ── MediaPipe tracker (optional — gracefully skips missing model files) ──
@@ -355,7 +360,7 @@ def main() -> None:
         # Webcam → compositor.webcam_queue (not preview_queue directly)
         t = WebcamCaptureThread(
             frame_queue=compositor.webcam_queue,
-            camera_index=camera_index,
+            device=camera_device,
         )
         _webcam.clear()
         _webcam.append(t)
@@ -363,7 +368,8 @@ def main() -> None:
 
         # MediaPipe tracker → VRM renderer (if available)
         if _vrm_renderer:
-            tracker = MediaPipeTracker(camera_index=camera_index)
+            cam_idx = int(camera_device) if isinstance(camera_device, int) else 0
+            tracker = MediaPipeTracker(camera_index=cam_idx)
             _tracker.clear()
             _tracker.append(tracker)
             # frame_updated is a cross-thread signal; Qt delivers it safely

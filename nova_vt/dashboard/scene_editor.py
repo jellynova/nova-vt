@@ -392,23 +392,39 @@ class SceneEditorDialog(QDialog):
         self._push_item({"type": "avatar", "vrm_path": dest, "rect": [1440, 540, 480, 540]})
 
     def _add_capture_layer(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose Video Device or File",
-            "/dev",
-            "Video Devices (video*);;All Files (*)",
+        import glob
+        from PyQt6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QVBoxLayout
+
+        devices = sorted(glob.glob("/dev/video*"))
+        if not devices:
+            devices = ["/dev/video0"]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select Capture Device")
+        layout = QVBoxLayout(dlg)
+        form = QFormLayout()
+        combo = QComboBox()
+        for dev in devices:
+            combo.addItem(dev)
+        form.addRow("Video device:", combo)
+        note = QLabel(
+            "Select the V4L2 camera device to use for this layer.\n"
+            "If unsure, try /dev/video0, /dev/video1, etc."
         )
-        if not path:
-            device, ok = QInputDialog.getText(
-                self,
-                "Capture Device",
-                "Enter device path (e.g. /dev/video0):",
-                text="/dev/video0",
-            )
-            if not ok or not device.strip():
-                return
-            path = device.strip()
-        self._push_item({"type": "capture", "device": path, "rect": [0, 0, 1920, 1080]})
+        note.setWordWrap(True)
+        form.addRow(note)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec():
+            device = combo.currentText().strip()
+            if device:
+                self._push_item({"type": "capture", "device": device, "rect": [0, 0, 1920, 1080]})
 
     def _add_text_layer(self) -> None:
         text, ok = QInputDialog.getText(
