@@ -6,7 +6,7 @@ layout(location = 2) in vec2 in_uv;
 layout(location = 3) in ivec4 in_joints;
 layout(location = 4) in vec4 in_weights;
 
-uniform mat4 u_joint_matrices[128];
+uniform mat4 u_joint_matrices[256];
 uniform mat4 u_mvp;
 
 out vec3 v_normal;

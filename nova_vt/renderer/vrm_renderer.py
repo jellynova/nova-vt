@@ -165,8 +165,8 @@ class VRMRenderer(QThread):
         joint_mats = self._loader.apply_pose(tracking.pose)
         if "u_joint_matrices" in prog and joint_mats is not None:
             flat = joint_mats.flatten().astype(np.float32)
-            padded = np.zeros(128 * 16, dtype=np.float32)
-            padded[:len(flat)] = flat
+            padded = np.zeros(256 * 16, dtype=np.float32)  # 256 joints max (shader limit)
+            padded[:min(len(flat), len(padded))] = flat[:min(len(flat), len(padded))]
             prog["u_joint_matrices"].write(padded.tobytes())
 
         for vao in vaos:
