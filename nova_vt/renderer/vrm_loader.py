@@ -53,7 +53,9 @@ class VRMLoader:
     def __init__(self, path: Path) -> None:
         import pygltflib  # lazy — only needed when a VRM file is actually loaded
         self._path = path
-        self._gltf = pygltflib.GLTF2().load(str(path))
+        # pygltflib.load() dispatches by extension — .vrm isn't .glb so it tries
+        # load_json() and crashes on binary data.  Force load_binary() instead.
+        self._gltf = pygltflib.GLTF2.load_binary(str(path))
         self.meshes: list[MeshData] = []
         self.skin: SkinData | None = None
         self.expression_map: dict[str, int] = {}  # ARKit name → morph target index
