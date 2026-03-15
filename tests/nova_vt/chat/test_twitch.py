@@ -43,13 +43,11 @@ class TestTwitchChatProvider:
         received: list[ChatMessage] = []
         provider.on_message(lambda m: received.append(m))
 
-        fake_author = mock.MagicMock()
-        fake_author.name = "viewer1"
-        fake_author.color = "#ff0000"
-
+        # twitchio v3: ChatMessage uses .chatter.name, .colour, .text
         fake_msg = mock.MagicMock()
-        fake_msg.author = fake_author
-        fake_msg.content = "PogChamp"
+        fake_msg.chatter.name = "viewer1"
+        fake_msg.colour = "#ff0000"
+        fake_msg.text = "PogChamp"
 
         provider._handle_raw_message(fake_msg)
 
@@ -63,12 +61,10 @@ class TestTwitchChatProvider:
 
     def test_handle_message_no_callback_does_not_raise(self):
         provider = self._make_provider()
-        fake_author = mock.MagicMock()
-        fake_author.name = "viewer"
-        fake_author.color = "#ffffff"
         fake_msg = mock.MagicMock()
-        fake_msg.author = fake_author
-        fake_msg.content = "hi"
+        fake_msg.chatter.name = "viewer"
+        fake_msg.colour = "#ffffff"
+        fake_msg.text = "hi"
         provider._handle_raw_message(fake_msg)
 
     def test_handle_sub_event_creates_sub_message(self):
@@ -89,8 +85,9 @@ class TestTwitchChatProvider:
         received: list[ChatMessage] = []
         provider.on_message(lambda m: received.append(m))
 
+        # twitchio v3: ChannelRaid uses .from_broadcaster.name
         fake_event = mock.MagicMock()
-        fake_event.raider.name = "raider_channel"
+        fake_event.from_broadcaster.name = "raider_channel"
         provider._handle_raid_event(fake_event)
 
         assert len(received) == 1

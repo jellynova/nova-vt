@@ -5,7 +5,7 @@ import queue
 from enum import Enum, auto
 from typing import Any, Callable, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -43,7 +43,13 @@ class MainWindow(QMainWindow):
     """Top-level application window.
 
     Dependency-injected callbacks allow test isolation without real threads.
+    Chat messages from background threads are bridged safely via a queued
+    pyqtSignal so no Qt widget is ever touched from a non-main thread.
     """
+
+    # Bridge signal: emits ChatMessage objects from background provider threads
+    # onto the Qt main thread before forwarding to ChatWidget.
+    _chat_message_received: pyqtSignal = pyqtSignal(object)
 
     def __init__(
         self,
@@ -55,6 +61,8 @@ class MainWindow(QMainWindow):
         stop_preview_fn: Callable[[], None],
         go_live_fn: Callable[[], None],
         end_stream_fn: Callable[[], None],
+        chat_manager: Any = None,
+        stream_stats: Any = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -63,6 +71,7 @@ class MainWindow(QMainWindow):
         self._stop_preview_fn = stop_preview_fn
         self._go_live_fn = go_live_fn
         self._end_stream_fn = end_stream_fn
+        self._stream_stats = stream_stats
         self.state = StreamState.IDLE
 
         self.setWindowTitle("nova-vt")
@@ -92,6 +101,17 @@ class MainWindow(QMainWindow):
         content.addWidget(right, stretch=1)
 
         root.addLayout(content)
+
+        # Wire chat: background threads emit into this signal; Qt queues delivery
+        # to the main thread before calling ChatWidget.add_message.
+        self._chat_message_received.connect(self._chat_widget.add_message)
+        if chat_manager is not None:
+            chat_manager.on_message(self._chat_message_received.emit)
+
+        # Stats polling timer (UI-side, 5 s) — updates PlatformStatsWidget
+        self._stats_timer = QTimer(self)
+        self._stats_timer.setInterval(5000)
+        self._stats_timer.timeout.connect(self._refresh_stats)
 
         self._apply_state()
 
@@ -206,14 +226,25 @@ class MainWindow(QMainWindow):
         self._go_live_fn()
         self._timer_elapsed = 0
         self._stream_clock.start()
+        self._stats_timer.start()
         self._apply_state()
 
     def _on_end_stream(self) -> None:
         self._stream_clock.stop()
+        self._stats_timer.stop()
         self._end_stream_fn()
         self._stop_preview_fn()
         self.state = StreamState.IDLE
         self._apply_state()
+
+    def _refresh_stats(self) -> None:
+        if self._stream_stats is None:
+            return
+        self._platform_stats.update_from_stream_stats({
+            "twitch": {"viewers": self._stream_stats.twitch_viewers, "likes": 0},
+            "youtube": {"viewers": self._stream_stats.youtube_viewers, "likes": 0},
+            "tiktok": {"viewers": self._stream_stats.tiktok_viewers, "likes": 0},
+        })
 
     def _on_scene_changed(self, scene_name: str) -> None:
         pass

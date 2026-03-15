@@ -126,6 +126,8 @@ class AudioMixerWidget(QWidget):
         self._mixer.set_volume(channel, value)
 
     def _update_vu_meters(self) -> None:
+        if not hasattr(self._mixer, "get_peaks"):
+            return
+        peaks: dict[str, float] = self._mixer.get_peaks()
         for ch in _CHANNELS:
-            peak: float = self._mixer.get_peak_level(ch) if hasattr(self._mixer, "get_peak_level") else 0.0
-            self._vu_meters[ch].setValue(int(peak * 100))
+            self._vu_meters[ch].setValue(int(peaks.get(ch, 0.0) * 100))

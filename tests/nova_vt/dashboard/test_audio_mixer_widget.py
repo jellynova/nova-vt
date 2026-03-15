@@ -18,7 +18,8 @@ DEFAULTS = {"mic": 75, "game": 60, "bgm": 30, "master": 90}
 
 def make_widget(qtbot):
     mock_mixer = MagicMock()
-    mock_mixer.get_peak_level = MagicMock(return_value=0.0)
+    # AudioMixerWidget calls get_peaks() → dict[str, float]
+    mock_mixer.get_peaks = MagicMock(return_value={ch: 0.0 for ch in ["mic", "game", "bgm", "master"]})
     widget = AudioMixerWidget(mixer=mock_mixer)
     qtbot.addWidget(widget)
     return widget, mock_mixer
@@ -74,7 +75,7 @@ def test_audio_mixer_vu_meter_range(qapp, qtbot):
 
 def test_audio_mixer_vu_update_from_mock(qapp, qtbot):
     widget, mock_mixer = make_widget(qtbot)
-    mock_mixer.get_peak_level.return_value = 0.75
+    mock_mixer.get_peaks.return_value = {ch: 0.75 for ch in CHANNELS}
     widget._update_vu_meters()
     for ch in CHANNELS:
         assert widget._vu_meters[ch].value() == 75
