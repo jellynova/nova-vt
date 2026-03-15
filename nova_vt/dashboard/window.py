@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         end_stream_fn: Callable[[], None],
         chat_manager: Any = None,
         stream_stats: Any = None,
+        scene_changed_fn: Optional[Callable[[str], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         self._end_stream_fn = end_stream_fn
         self._stream_stats = stream_stats
         self._chat_manager = chat_manager
+        self._scene_changed_fn = scene_changed_fn
         self.state = StreamState.IDLE
 
         self.setWindowTitle("nova-vt")
@@ -251,10 +253,9 @@ class MainWindow(QMainWindow):
         })
 
     def _on_scene_changed(self, scene_name: str) -> None:
-        # Signals the nova-vt compositor to switch the active scene layer set.
-        # Compositor integration is wired via start_preview_fn / go_live_fn callbacks
-        # once the video compositor component is implemented.
         _log.debug("Scene changed: %r", scene_name)
+        if self._scene_changed_fn is not None:
+            self._scene_changed_fn(scene_name)
 
     def _on_chat_send(self, text: str, platform: str) -> None:
         if self._chat_manager is None or not text.strip():

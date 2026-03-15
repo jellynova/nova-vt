@@ -46,6 +46,9 @@ class MediaPipeTracker(QThread):
     """
 
     error = pyqtSignal(str)
+    # Emitted on the tracker's own thread each time a new TrackingFrame is ready.
+    # Connect to VRMRenderer.update_tracking via Qt::QueuedConnection for thread safety.
+    frame_updated = pyqtSignal(object)
 
     def __init__(self, camera_index: int = 0) -> None:
         super().__init__()
@@ -102,12 +105,14 @@ class MediaPipeTracker(QThread):
                     if result.pose_world_landmarks:
                         pose = landmarks_to_pose(result.pose_world_landmarks[0])
 
+                new_frame = TrackingFrame(
+                    pose=pose,
+                    blend_shapes=blend_shapes,
+                    timestamp=time.time(),
+                )
                 with self._frame_lock:
-                    self._latest = TrackingFrame(
-                        pose=pose,
-                        blend_shapes=blend_shapes,
-                        timestamp=time.time(),
-                    )
+                    self._latest = new_frame
+                self.frame_updated.emit(new_frame)
             except Exception:
                 pass  # don't crash the loop on a bad frame
 

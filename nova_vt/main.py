@@ -1,21 +1,28 @@
 """nova-vt application entrypoint.
 
-Creates and wires the full pipeline:
-  AudioMixer (QThread) → encoder_queue → EncoderThread (QThread) → ffmpeg → RTMP
+Full pipeline:
+
+  WebcamCaptureThread → compositor.webcam_queue ─┐
+                                                   ├─→ Compositor → preview_queue → PreviewWidget
+  MediaPipeTracker → VRMRenderer → compositor.avatar_queue ─┘          └─→ encoder_queue → EncoderThread → ffmpeg → RTMP
+
   TwitchChatProvider + YouTubeChatProvider + TikTokChatProvider → ChatManager → MainWindow
   StatsPollerThread → StreamStats → MainWindow (5 s UI refresh)
   MainWindow (PyQt6 QMainWindow) — idle → previewing → live state machine
+
+When no VRM path is configured the avatar pipeline is skipped and only the
+webcam feed (via the compositor) is shown.  When no scene JSON exists for the
+active scene the compositor falls back to a full-canvas webcam display.
 """
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import time
 import tomllib
 from pathlib import Path
 from typing import Any
-
-from nova_vt.capture.webcam import WebcamCaptureThread
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +69,6 @@ class AppConfig:
         try:
             import tomli_w
         except ImportError:
-            # tomli_w is optional; fall back to a basic serialiser
             _write_toml(self._config_path, self._data)
             _write_toml(self._secrets_path, self._secrets)
             return
@@ -96,7 +102,6 @@ def _write_toml(path: Path, data: dict) -> None:
                 else:
                     lines.append(f"{k} = {v}")
         else:
-            # top-level scalar
             if isinstance(values, str):
                 lines.append(f'{section} = "{values}"')
             else:
@@ -152,7 +157,6 @@ def _make_youtube_viewer_fetcher(
             token_uri="https://oauth2.googleapis.com/token",
         )
         svc = build("youtube", "v3", credentials=creds, cache_discovery=False)
-        # Find the active broadcast
         resp = svc.liveBroadcasts().list(
             part="id",
             broadcastStatus="active",
@@ -163,7 +167,6 @@ def _make_youtube_viewer_fetcher(
         if not items:
             return 0
         video_id = items[0]["id"]
-        # Fetch concurrent viewer count from video statistics
         vresp = svc.videos().list(
             part="liveStreamingDetails",
             id=video_id,
@@ -175,6 +178,25 @@ def _make_youtube_viewer_fetcher(
         return int(details.get("concurrentViewers", 0))
 
     return fetch
+
+
+# ---------------------------------------------------------------------------
+# Scene loader helper
+# ---------------------------------------------------------------------------
+
+def _load_scene_data(scene_name: str) -> dict[str, Any]:
+    """Load scene JSON from ~/.config/nova-vt/scenes/<name>.json.
+
+    Returns a minimal default dict if the file doesn't exist or can't be parsed.
+    """
+    scene_path = Path.home() / ".config" / "nova-vt" / "scenes" / f"{scene_name}.json"
+    if scene_path.exists():
+        try:
+            with open(scene_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"name": scene_name, "layers": []}
 
 
 # ---------------------------------------------------------------------------
@@ -282,32 +304,106 @@ def main() -> None:
     stats_poller = StatsPollerThread(stats=stream_stats, fetchers=stat_fetchers, interval=30.0)
     stats_poller.start()
 
-    # ── Preview queue + webcam capture ───────────────────────────────────
+    # ── Compositor ───────────────────────────────────────────────────────
+    from nova_vt.compositor.compositor import Compositor
+
     preview_queue: queue.Queue = queue.Queue(maxsize=4)
+    compositor = Compositor(preview_queue=preview_queue, fps=30)
+
+    # ── VRM Renderer (optional — requires a configured VRM path) ─────────
+    from nova_vt.renderer.vrm_loader import VRMLoader
+    from nova_vt.renderer.vrm_renderer import VRMRenderer
+
+    vrm_path = config.get("renderer", "vrm_path") or ""
+    _vrm_renderer: list[VRMRenderer] = []
+
+    if vrm_path and Path(vrm_path).exists():
+        try:
+            loader = VRMLoader(vrm_path)
+            renderer = VRMRenderer(
+                loader=loader,
+                # Push to compositor's avatar_queue instead of preview_queue directly
+                preview_queue=compositor.avatar_queue,
+                fps=30,
+            )
+            _vrm_renderer.append(renderer)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "VRM renderer init failed (%s) — avatar disabled", exc
+            )
+
+    # ── Webcam capture ───────────────────────────────────────────────────
+    from nova_vt.capture.webcam import WebcamCaptureThread
+
     camera_index = int(config.get("tracker", "camera_index") or 0)
-    _webcam: list[WebcamCaptureThread] = []  # mutable container so closures can reassign
+    _webcam: list[WebcamCaptureThread] = []
+
+    # ── MediaPipe tracker (optional — gracefully skips missing model files) ──
+    from nova_vt.tracking.mediapipe_tracker import MediaPipeTracker
+
+    _tracker: list[MediaPipeTracker] = []
+
+    # ── Initial scene ────────────────────────────────────────────────────
+    scene_names = config.scenes or ["Gameplay", "Just Chatting", "BRB"]
+    _active_scene: list[str] = [scene_names[0]]
+
+    compositor.set_scene(_load_scene_data(_active_scene[0]))
 
     # ── Callbacks ────────────────────────────────────────────────────────
+
     def start_preview() -> None:
-        t = WebcamCaptureThread(frame_queue=preview_queue, camera_index=camera_index)
+        # Webcam → compositor.webcam_queue (not preview_queue directly)
+        t = WebcamCaptureThread(
+            frame_queue=compositor.webcam_queue,
+            camera_index=camera_index,
+        )
         _webcam.clear()
         _webcam.append(t)
         t.start()
+
+        # MediaPipe tracker → VRM renderer (if available)
+        if _vrm_renderer:
+            tracker = MediaPipeTracker(camera_index=camera_index)
+            _tracker.clear()
+            _tracker.append(tracker)
+            # frame_updated is a cross-thread signal; Qt delivers it safely
+            tracker.frame_updated.connect(_vrm_renderer[0].update_tracking)
+            tracker.start()
+            _vrm_renderer[0].start()
+
+        compositor.start()
         mixer.start()
 
     def stop_preview() -> None:
         if _webcam:
             _webcam[0].stop()
+            _webcam.clear()
+        if _tracker:
+            _tracker[0].stop()
+            _tracker[0].wait()
+            _tracker.clear()
+        if _vrm_renderer:
+            _vrm_renderer[0].stop()
+            _vrm_renderer[0].wait()
+        compositor.stop()
+        compositor.wait()
         mixer.stop_mixing()
 
     def go_live() -> None:
         stream_stats.set_stream_start(time.time())
         if config.rtmp_targets:
+            compositor.set_encoder_queue(video_queue)
             encoder.start()
 
     def end_stream() -> None:
+        compositor.set_encoder_queue(None)
         encoder.stop_encoding()
         stream_stats.reset()
+
+    def on_scene_changed(scene_name: str) -> None:
+        _active_scene[0] = scene_name
+        compositor.set_scene(_load_scene_data(scene_name))
 
     # ── Window ───────────────────────────────────────────────────────────
     from nova_vt.dashboard.window import MainWindow
@@ -316,13 +412,14 @@ def main() -> None:
         config=config,
         preview_queue=preview_queue,
         mixer=mixer,
-        scenes=config.scenes or ["Gameplay", "Just Chatting", "BRB"],
+        scenes=scene_names,
         start_preview_fn=start_preview,
         stop_preview_fn=stop_preview,
         go_live_fn=go_live,
         end_stream_fn=end_stream,
         chat_manager=chat_manager,
         stream_stats=stream_stats,
+        scene_changed_fn=on_scene_changed,
     )
     window.show()
 
