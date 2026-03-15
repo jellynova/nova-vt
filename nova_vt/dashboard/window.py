@@ -216,7 +216,7 @@ class MainWindow(QMainWindow):
 
         self._preview_btn.setVisible(idle or previewing)
         self._go_live_btn.setEnabled(previewing)
-        self._edit_scenes_btn.setVisible(previewing)
+        self._edit_scenes_btn.setVisible(not live)  # available in IDLE + PREVIEWING
         self._live_indicator.setVisible(live)
         self._audio_mixer.set_live(live)
 
@@ -279,11 +279,27 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _open_scene_editor(self) -> None:
+        import json
+        from pathlib import Path
         from nova_vt.dashboard.scene_editor import SceneEditorDialog
-        scene_data = {"name": self._scene_switcher.active_scene(), "layers": []}
+
+        scene_name = self._scene_switcher.active_scene()
+        scenes_dir = Path.home() / ".config" / "nova-vt" / "scenes"
+        scenes_dir.mkdir(parents=True, exist_ok=True)
+        scene_path = scenes_dir / f"{scene_name}.json"
+
+        if scene_path.exists():
+            try:
+                with open(scene_path, "r", encoding="utf-8") as f:
+                    scene_data = json.load(f)
+            except Exception:
+                scene_data = {"name": scene_name, "layers": []}
+        else:
+            scene_data = {"name": scene_name, "layers": []}
+
         dlg = SceneEditorDialog(scene_data=scene_data, parent=self)
         if dlg.exec():
-            pass
+            dlg.save_scene(scene_path)
 
     def closeEvent(self, event) -> None:
         self._preview_widget.stop()
