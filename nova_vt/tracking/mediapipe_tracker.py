@@ -50,7 +50,7 @@ class MediaPipeTracker(QThread):
     # Connect to VRMRenderer.update_tracking via Qt::QueuedConnection for thread safety.
     frame_updated = pyqtSignal(object)
 
-    def __init__(self, camera_index: int = 0) -> None:
+    def __init__(self, camera_index: "int | str" = 0) -> None:
         super().__init__()
         self._camera_index = camera_index
         self._stop_event = threading.Event()
@@ -120,10 +120,11 @@ class MediaPipeTracker(QThread):
             cap.release()
 
     def _open_camera(self) -> Optional[cv2.VideoCapture]:
-        for backend in [cv2.CAP_V4L2, cv2.CAP_ANY]:
-            cap = cv2.VideoCapture(self._camera_index, backend)
-            if cap.isOpened():
-                return cap
+        # Use the same no-backend approach as WebcamCaptureThread so string
+        # device paths like "/dev/video0" work (V4L2 backend rejects them).
+        cap = cv2.VideoCapture(self._camera_index)
+        if cap.isOpened():
+            return cap
         return None
 
     def _build_face_landmarker(self):

@@ -378,7 +378,13 @@ def main() -> None:
                 fps=30,
             )
             _vrm_renderer.append(renderer)
-            logging.getLogger(__name__).info("VRM renderer ready: %s", candidate)
+            _vrm_log = logging.getLogger(__name__)
+            _vrm_log.info("VRM renderer ready: %s", candidate)
+            renderer.error.connect(
+                lambda msg: logging.getLogger("nova_vt.renderer.vrm_renderer").error(
+                    "VRM render loop crashed: %s", msg
+                )
+            )
         except Exception as exc:
             logging.getLogger(__name__).warning("VRM renderer init failed (%s)", exc)
 
@@ -401,8 +407,7 @@ def main() -> None:
 
         # MediaPipe tracker → VRM renderer (if available)
         if _vrm_renderer:
-            cam_idx = int(camera_device) if isinstance(camera_device, int) else 0
-            tracker = MediaPipeTracker(camera_index=cam_idx)
+            tracker = MediaPipeTracker(camera_index=camera_device)
             _tracker.clear()
             _tracker.append(tracker)
             # frame_updated is a cross-thread signal; Qt delivers it safely

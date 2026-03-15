@@ -37,6 +37,7 @@ class MeshData:
     indices: np.ndarray        # (M,) uint16 or uint32
     morph_targets: list[np.ndarray] = field(default_factory=list)
     morph_names: list[str] = field(default_factory=list)
+    texture_rgba: np.ndarray | None = None  # (H, W, 4) uint8 or None
 
 
 @dataclass
@@ -60,6 +61,11 @@ class VRMLoader:
         self.skin: SkinData | None = None
         self.expression_map: dict[str, int] = {}  # ARKit name → morph target index
         self._load()
+
+    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return (min_xyz, max_xyz) over all mesh positions."""
+        all_pos = np.concatenate([m.positions for m in self.meshes], axis=0)
+        return all_pos.min(axis=0), all_pos.max(axis=0)
 
     def apply_pose(self, pose_dict: dict[str, tuple]) -> np.ndarray:
         """Return (B, 4, 4) float32 joint matrices for GPU upload."""
@@ -117,6 +123,7 @@ class VRMLoader:
             if pos_acc is not None:
                 morph_targets.append(self._accessor_to_numpy(pos_acc))
                 morph_names.append(str(i))
+        texture_rgba = self._load_material_texture(prim)
         return MeshData(
             positions=positions.astype(np.float32),
             normals=normals.astype(np.float32),
@@ -124,7 +131,77 @@ class VRMLoader:
             indices=indices,
             morph_targets=morph_targets,
             morph_names=morph_names,
+            texture_rgba=texture_rgba,
         )
+
+    def _load_material_texture(self, prim) -> "np.ndarray | None":
+        """Return RGBA uint8 texture for the primitive's material, or None."""
+        import io
+        gltf = self._gltf
+        mat_idx = getattr(prim, "material", None)
+        if mat_idx is None or not gltf.materials:
+            return None
+        mat = gltf.materials[mat_idx]
+
+        # Try standard PBR base colour texture first
+        tex_idx: int | None = None
+        pbr = getattr(mat, "pbrMetallicRoughness", None)
+        if pbr is not None:
+            bct = getattr(pbr, "baseColorTexture", None)
+            if bct is not None:
+                tex_idx = getattr(bct, "index", None)
+
+        # Fall back to MToon / VRM extension mainTexture
+        if tex_idx is None:
+            exts = (mat.extensions or {}) if hasattr(mat, "extensions") else {}
+            for ext_name in ("VRMC_materials_mtoon", "KHR_materials_unlit", "VRM"):
+                ext = exts.get(ext_name, {})
+                if isinstance(ext, dict):
+                    mt = ext.get("shadeMultiplyTexture") or ext.get("mainTexture")
+                    if isinstance(mt, dict) and "index" in mt:
+                        tex_idx = mt["index"]
+                        break
+
+        if tex_idx is None or not gltf.textures:
+            return None
+        tex = gltf.textures[tex_idx]
+        img_idx = getattr(tex, "source", None)
+        if img_idx is None or not gltf.images:
+            return None
+        img = gltf.images[img_idx]
+
+        # Load raw bytes from bufferView or URI
+        try:
+            bv_idx = getattr(img, "bufferView", None)
+            if bv_idx is not None:
+                bv = gltf.bufferViews[bv_idx]
+                buf = gltf.buffers[bv.buffer]
+                raw_blob: bytes = bytes(gltf.binary_blob())
+                start = bv.byteOffset or 0
+                img_bytes = raw_blob[start: start + bv.byteLength]
+            else:
+                uri = getattr(img, "uri", None)
+                if not uri:
+                    return None
+                import base64, urllib.parse
+                if uri.startswith("data:"):
+                    img_bytes = base64.b64decode(uri.split(",", 1)[1])
+                else:
+                    img_bytes = (self._path.parent / urllib.parse.unquote(uri)).read_bytes()
+
+            import cv2
+            arr = cv2.imdecode(np.frombuffer(img_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+            if arr is None:
+                return None
+            if arr.ndim == 2:
+                arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2RGBA)
+            elif arr.shape[2] == 3:
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGBA)
+            elif arr.shape[2] == 4:
+                arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGBA)
+            return arr.astype(np.uint8)
+        except Exception:
+            return None
 
     def _load_skin(self, skin) -> SkinData:
         gltf = self._gltf

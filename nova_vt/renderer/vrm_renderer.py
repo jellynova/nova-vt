@@ -42,6 +42,7 @@ class VRMRenderer(QThread):
         self._stop_event = threading.Event()
         self._current_frame = TrackingFrame()
         self._frame_lock = threading.Lock()
+        self._model_bounds: tuple | None = None
 
     def update_tracking(self, frame: TrackingFrame) -> None:
         with self._frame_lock:
@@ -73,7 +74,8 @@ class VRMRenderer(QThread):
             fragment_shader=(shader_dir / "mtoon.frag").read_text(),
         )
 
-        vaos = self._build_vaos(ctx, prog)
+        vaos, textures = self._build_vaos(ctx, prog)
+        self._model_bounds = self._loader.bounds()
         frame_time = 1.0 / self._fps
 
         while not self._stop_event.is_set():
@@ -81,7 +83,7 @@ class VRMRenderer(QThread):
             with self._frame_lock:
                 tracking = self._current_frame
 
-            self._render_frame(ctx, fbo, prog, vaos, tracking)
+            self._render_frame(ctx, fbo, prog, vaos, textures, tracking)
 
             raw = fbo.read(components=4)
             arr = np.frombuffer(raw, dtype=np.uint8).reshape(self._height, self._width, 4)
@@ -107,9 +109,10 @@ class VRMRenderer(QThread):
         fbo.release()
         ctx.release()
 
-    def _build_vaos(self, ctx, prog) -> list:
+    def _build_vaos(self, ctx, prog) -> tuple[list, list]:
         import moderngl
         vaos = []
+        textures = []
         for mesh in self._loader.meshes:
             vbo_pos = ctx.buffer(mesh.positions.tobytes())
             vbo_nor = ctx.buffer(mesh.normals.tobytes())
@@ -134,9 +137,16 @@ class VRMRenderer(QThread):
                 ibo,
             )
             vaos.append(vao)
-        return vaos
+            # Upload texture to GPU if available
+            tex = None
+            if mesh.texture_rgba is not None:
+                h, w = mesh.texture_rgba.shape[:2]
+                tex = ctx.texture((w, h), 4, mesh.texture_rgba.tobytes())
+                tex.build_mipmaps()
+            textures.append(tex)
+        return vaos, textures
 
-    def _render_frame(self, ctx, fbo, prog, vaos, tracking: TrackingFrame) -> None:
+    def _render_frame(self, ctx, fbo, prog, vaos, textures, tracking: TrackingFrame) -> None:
         import moderngl
 
         ctx.clear(0.0, 0.0, 0.0, 0.0)
@@ -144,43 +154,72 @@ class VRMRenderer(QThread):
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
-        mvp = _ortho_mvp(self._width, self._height)
+        mvp = _ortho_mvp(self._width, self._height, self._model_bounds)
         if "u_mvp" in prog:
-            prog["u_mvp"].write(mvp.astype(np.float32).tobytes())
+            prog["u_mvp"].write(mvp.T.astype(np.float32).tobytes())
         if "u_light_dir" in prog:
             prog["u_light_dir"].value = (0.0, -1.0, -1.0)
-        if "u_lit_color" in prog:
-            prog["u_lit_color"].value = (0.8, 0.6, 0.9, 1.0)
-        if "u_shade_color" in prog:
-            prog["u_shade_color"].value = (0.4, 0.2, 0.6, 1.0)
         if "u_shade_shift" in prog:
             prog["u_shade_shift"].value = 0.0
         if "u_shade_toony" in prog:
             prog["u_shade_toony"].value = 0.9
         if "u_alpha_cutoff" in prog:
             prog["u_alpha_cutoff"].value = 0.0
-        if "u_has_texture" in prog:
-            prog["u_has_texture"].value = 0
 
         joint_mats = self._loader.apply_pose(tracking.pose)
         if "u_joint_matrices" in prog and joint_mats is not None:
             flat = joint_mats.flatten().astype(np.float32)
-            padded = np.zeros(256 * 16, dtype=np.float32)  # 256 joints max (shader limit)
+            padded = np.zeros(256 * 16, dtype=np.float32)
             padded[:min(len(flat), len(padded))] = flat[:min(len(flat), len(padded))]
             prog["u_joint_matrices"].write(padded.tobytes())
 
-        for vao in vaos:
+        for vao, tex in zip(vaos, textures):
+            if tex is not None:
+                tex.use(location=0)
+                if "u_has_texture" in prog:
+                    prog["u_has_texture"].value = 1
+                if "u_lit_color" in prog:
+                    prog["u_lit_color"].value = (1.0, 1.0, 1.0, 1.0)
+                if "u_shade_color" in prog:
+                    prog["u_shade_color"].value = (0.7, 0.7, 0.7, 1.0)
+            else:
+                if "u_has_texture" in prog:
+                    prog["u_has_texture"].value = 0
+                if "u_lit_color" in prog:
+                    prog["u_lit_color"].value = (0.9, 0.9, 0.9, 1.0)
+                if "u_shade_color" in prog:
+                    prog["u_shade_color"].value = (0.6, 0.6, 0.6, 1.0)
             vao.render(moderngl.TRIANGLES)
 
 
-def _ortho_mvp(width: int, height: int) -> np.ndarray:
+def _ortho_mvp(
+    width: int,
+    height: int,
+    bounds: tuple[np.ndarray, np.ndarray] | None = None,
+) -> np.ndarray:
+    """Build an orthographic MVP that frames the avatar's head/upper body.
+
+    The model sits with feet at Y≈0 and head at Y≈model_height.  We show
+    the top ~55 % of the model (head + shoulders) and pad 10 % on each side.
+    """
+    if bounds is not None:
+        mn, mx = bounds
+        model_h = float(mx[1] - mn[1])
+        cx = float((mn[0] + mx[0]) / 2)
+        # Full body with padding
+        t = float(mx[1]) + model_h * 0.06
+        b = float(mn[1]) - model_h * 0.04
+        half_h = (t - b) / 2
+        aspect = width / height
+        half_w = half_h * aspect
+        l, r = cx - half_w, cx + half_w
+    else:
+        l, r, b, t = -1.0, 1.0, -1.0, 1.0
+
     near, far = -10.0, 10.0
-    l, r = -1.0, 1.0
-    b, t = -1.0, 1.0
-    m = np.array([
-        [2/(r-l),   0,          0,          -(r+l)/(r-l)],
-        [0,         2/(t-b),    0,          -(t+b)/(t-b)],
-        [0,         0,         -2/(far-near), -(far+near)/(far-near)],
-        [0,         0,          0,           1],
+    return np.array([
+        [2/(r-l),  0,          0,            -(r+l)/(r-l)],
+        [0,        2/(t-b),    0,            -(t+b)/(t-b)],
+        [0,        0,         -2/(far-near), -(far+near)/(far-near)],
+        [0,        0,          0,             1],
     ], dtype=np.float32)
-    return m
