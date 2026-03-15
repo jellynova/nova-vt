@@ -15,6 +15,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from nova_vt.capture.webcam import WebcamCaptureThread
+
 
 # ---------------------------------------------------------------------------
 # AppConfig — thin TOML-backed config compatible with SettingsDialog API
@@ -280,14 +282,22 @@ def main() -> None:
     stats_poller = StatsPollerThread(stats=stream_stats, fetchers=stat_fetchers, interval=30.0)
     stats_poller.start()
 
-    # ── Preview queue (video frames from future compositor) ──────────────
+    # ── Preview queue + webcam capture ───────────────────────────────────
     preview_queue: queue.Queue = queue.Queue(maxsize=4)
+    camera_index = int(config.get("tracker", "camera_index") or 0)
+    _webcam: list[WebcamCaptureThread] = []  # mutable container so closures can reassign
 
     # ── Callbacks ────────────────────────────────────────────────────────
     def start_preview() -> None:
+        t = WebcamCaptureThread(frame_queue=preview_queue, camera_index=camera_index)
+        _webcam.clear()
+        _webcam.append(t)
+        t.start()
         mixer.start()
 
     def stop_preview() -> None:
+        if _webcam:
+            _webcam[0].stop()
         mixer.stop_mixing()
 
     def go_live() -> None:
