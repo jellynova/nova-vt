@@ -114,6 +114,11 @@ class YouTubeChatProvider:
         from googleapiclient.discovery import build
         from google.oauth2.credentials import Credentials
 
-        token = self._credentials.get("access_token", "")
-        creds = Credentials(token=token)
+        creds = Credentials(
+            token=self._credentials.get("access_token", ""),
+            refresh_token=self._credentials.get("refresh_token"),
+            client_id=self._credentials.get("client_id"),
+            client_secret=self._credentials.get("client_secret"),
+            token_uri=self._credentials.get("token_uri", "https://oauth2.googleapis.com/token"),
+        )
         return build("youtube", "v3", credentials=creds, cache_discovery=False)

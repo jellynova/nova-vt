@@ -1,11 +1,14 @@
 """MainWindow — Studio+Chat layout, stream state machine, thread orchestration."""
 from __future__ import annotations
 
+import logging
 import queue
 from enum import Enum, auto
 from typing import Any, Callable, Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+
+_log = logging.getLogger(__name__)
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -63,6 +66,7 @@ class MainWindow(QMainWindow):
         end_stream_fn: Callable[[], None],
         chat_manager: Any = None,
         stream_stats: Any = None,
+        obs_switch_fn: Optional[Callable[[str], None]] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -72,6 +76,8 @@ class MainWindow(QMainWindow):
         self._go_live_fn = go_live_fn
         self._end_stream_fn = end_stream_fn
         self._stream_stats = stream_stats
+        self._chat_manager = chat_manager
+        self._obs_switch_fn = obs_switch_fn
         self.state = StreamState.IDLE
 
         self.setWindowTitle("nova-vt")
@@ -247,10 +253,21 @@ class MainWindow(QMainWindow):
         })
 
     def _on_scene_changed(self, scene_name: str) -> None:
-        pass
+        if self._obs_switch_fn is not None:
+            try:
+                self._obs_switch_fn(scene_name)
+            except Exception:
+                _log.exception("OBS scene switch failed for %r", scene_name)
 
     def _on_chat_send(self, text: str, platform: str) -> None:
-        pass
+        if self._chat_manager is None or not text.strip():
+            return
+        # platform is "All" when the unified tab is active → broadcast to all providers
+        target: str | None = platform if platform != "All" else None
+        try:
+            self._chat_manager.send(text, target)
+        except Exception:
+            _log.exception("Chat send failed (platform=%r)", platform)
 
     def _tick_timer(self) -> None:
         self._timer_elapsed += 1

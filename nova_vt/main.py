@@ -103,6 +103,79 @@ def _write_toml(path: Path, data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Viewer count fetchers (synchronous, for StatsPollerThread)
+# ---------------------------------------------------------------------------
+
+def _make_twitch_viewer_fetcher(
+    client_id: str, token: str, broadcaster_user_id: str
+):
+    """Returns a callable() → int that fetches live viewer count from Twitch Helix."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    def fetch() -> int:
+        import requests
+        resp = requests.get(
+            "https://api.twitch.tv/helix/streams",
+            headers={"Client-Id": client_id, "Authorization": f"Bearer {token}"},
+            params={"user_id": broadcaster_user_id},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        return int(data[0]["viewer_count"]) if data else 0
+
+    return fetch
+
+
+def _make_youtube_viewer_fetcher(
+    access_token: str,
+    refresh_token: str | None = None,
+    client_id: str | None = None,
+    client_secret: str | None = None,
+):
+    """Returns a callable() → int that fetches concurrent viewers from YouTube Live."""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    def fetch() -> int:
+        from googleapiclient.discovery import build
+        from google.oauth2.credentials import Credentials
+
+        creds = Credentials(
+            token=access_token,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+        svc = build("youtube", "v3", credentials=creds, cache_discovery=False)
+        # Find the active broadcast
+        resp = svc.liveBroadcasts().list(
+            part="id",
+            broadcastStatus="active",
+            mine=True,
+            maxResults=1,
+        ).execute()
+        items = resp.get("items", [])
+        if not items:
+            return 0
+        video_id = items[0]["id"]
+        # Fetch concurrent viewer count from video statistics
+        vresp = svc.videos().list(
+            part="liveStreamingDetails",
+            id=video_id,
+        ).execute()
+        vitems = vresp.get("items", [])
+        if not vitems:
+            return 0
+        details = vitems[0].get("liveStreamingDetails", {})
+        return int(details.get("concurrentViewers", 0))
+
+    return fetch
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -163,11 +236,20 @@ def main() -> None:
         })
 
     yt_token = config.get_secret("youtube", "access_token") or ""
+    yt_refresh = config.get_secret("youtube", "refresh_token") or ""
+    yt_client_id = config.get_secret("youtube", "client_id") or ""
+    yt_client_secret = config.get_secret("youtube", "client_secret") or ""
     yt_chat_id = config.get("youtube", "live_chat_id") or ""
     if yt_token and yt_chat_id:
         youtube = YouTubeChatProvider()
         chat_manager.add_provider("youtube", youtube)
-        youtube.connect({"access_token": yt_token, "live_chat_id": yt_chat_id})
+        youtube.connect({
+            "access_token": yt_token,
+            "refresh_token": yt_refresh,
+            "client_id": yt_client_id,
+            "client_secret": yt_client_secret,
+            "live_chat_id": yt_chat_id,
+        })
 
     tiktok_username = config.get("tiktok", "username") or ""
     if tiktok_username:
@@ -179,9 +261,39 @@ def main() -> None:
     from nova_vt.chat.stats import StreamStats, StatsPollerThread
 
     stream_stats = StreamStats()
-    # Fetchers are stubs — real implementations would hit platform APIs
-    stats_poller = StatsPollerThread(stats=stream_stats, fetchers={}, interval=30.0)
+
+    stat_fetchers: dict[str, Any] = {}
+    if twitch_client_id and twitch_token and twitch_broadcaster_id:
+        stat_fetchers["twitch"] = _make_twitch_viewer_fetcher(
+            client_id=twitch_client_id,
+            token=twitch_token,
+            broadcaster_user_id=twitch_broadcaster_id,
+        )
+    if yt_token and yt_chat_id:
+        stat_fetchers["youtube"] = _make_youtube_viewer_fetcher(
+            access_token=yt_token,
+            refresh_token=yt_refresh,
+            client_id=yt_client_id,
+            client_secret=yt_client_secret,
+        )
+
+    stats_poller = StatsPollerThread(stats=stream_stats, fetchers=stat_fetchers, interval=30.0)
     stats_poller.start()
+
+    # ── OBS ──────────────────────────────────────────────────────────────
+    obs_switch_fn = None
+    obs_host = config.get("obs", "host") or "localhost"
+    obs_port = int(config.get("obs", "port") or 4455)
+    obs_password = config.get_secret("obs", "password") or ""
+    try:
+        from orchestrator.obs_controller import OBSController
+        _obs = OBSController(host=obs_host, port=obs_port, password=obs_password)
+        obs_switch_fn = _obs.switch_scene
+    except Exception:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "OBS not available — scene switching disabled (is OBS running?)"
+        )
 
     # ── Preview queue (video frames from future compositor) ──────────────
     preview_queue: queue.Queue = queue.Queue(maxsize=4)
@@ -216,6 +328,7 @@ def main() -> None:
         end_stream_fn=end_stream,
         chat_manager=chat_manager,
         stream_stats=stream_stats,
+        obs_switch_fn=obs_switch_fn,
     )
     window.show()
 
