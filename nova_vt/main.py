@@ -280,21 +280,6 @@ def main() -> None:
     stats_poller = StatsPollerThread(stats=stream_stats, fetchers=stat_fetchers, interval=30.0)
     stats_poller.start()
 
-    # ── OBS ──────────────────────────────────────────────────────────────
-    obs_switch_fn = None
-    obs_host = config.get("obs", "host") or "localhost"
-    obs_port = int(config.get("obs", "port") or 4455)
-    obs_password = config.get_secret("obs", "password") or ""
-    try:
-        from orchestrator.obs_controller import OBSController
-        _obs = OBSController(host=obs_host, port=obs_port, password=obs_password)
-        obs_switch_fn = _obs.switch_scene
-    except Exception:
-        import logging as _logging
-        _logging.getLogger(__name__).warning(
-            "OBS not available — scene switching disabled (is OBS running?)"
-        )
-
     # ── Preview queue (video frames from future compositor) ──────────────
     preview_queue: queue.Queue = queue.Queue(maxsize=4)
 
@@ -328,7 +313,6 @@ def main() -> None:
         end_stream_fn=end_stream,
         chat_manager=chat_manager,
         stream_stats=stream_stats,
-        obs_switch_fn=obs_switch_fn,
     )
     window.show()
 
