@@ -184,19 +184,25 @@ def _make_youtube_viewer_fetcher(
 # Scene loader helper
 # ---------------------------------------------------------------------------
 
-def _load_scene_data(scene_name: str) -> dict[str, Any]:
+def _load_scene_data(scene_name: str, camera_device: "str | int" = 0) -> dict[str, Any]:
     """Load scene JSON from ~/.config/nova-vt/scenes/<name>.json.
 
-    Returns a minimal default dict if the file doesn't exist or can't be parsed.
+    Returns a default capture-layer scene if the file doesn't exist or is empty.
     """
     scene_path = Path.home() / ".config" / "nova-vt" / "scenes" / f"{scene_name}.json"
     if scene_path.exists():
         try:
             with open(scene_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            if data.get("layers"):
+                return data
         except Exception:
             pass
-    return {"name": scene_name, "layers": []}
+    # Default: full-canvas webcam capture so the preview is never blank
+    return {
+        "name": scene_name,
+        "layers": [{"type": "capture", "device": str(camera_device), "rect": [0, 0, 1920, 1080], "z": 0}],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +358,7 @@ def main() -> None:
     scene_names = config.scenes or ["Gameplay", "Just Chatting", "BRB"]
     _active_scene: list[str] = [scene_names[0]]
 
-    compositor.set_scene(_load_scene_data(_active_scene[0]))
+    compositor.set_scene(_load_scene_data(_active_scene[0], camera_device))
 
     # ── Callbacks ────────────────────────────────────────────────────────
 
@@ -408,7 +414,7 @@ def main() -> None:
 
     def on_scene_changed(scene_name: str) -> None:
         _active_scene[0] = scene_name
-        compositor.set_scene(_load_scene_data(scene_name))
+        compositor.set_scene(_load_scene_data(scene_name, camera_device))
 
     # ── Window ───────────────────────────────────────────────────────────
     from nova_vt.dashboard.window import MainWindow

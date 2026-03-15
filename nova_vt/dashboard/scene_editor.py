@@ -54,6 +54,84 @@ _LAYER_LABELS: dict[str, str] = {
 
 _HANDLE = 8  # half-size of corner handle hit area
 
+# Thumbnail cache: vrm_path → QPixmap (or None if extraction failed)
+_vrm_thumb_cache: dict[str, "QPixmap | None"] = {}
+
+
+def _extract_vrm_thumbnail(vrm_path: str) -> "QPixmap | None":
+    """Extract the embedded thumbnail PNG from a VRM/GLB file.
+
+    VRM 0.x: extensions.VRM.meta.texture → textures[i].source → images[j].bufferView
+    VRM 1.0: extensions.VRMC_vrm.meta.thumbnailImage → images[i].bufferView
+
+    Returns None if no thumbnail found or any error occurs.
+    """
+    if vrm_path in _vrm_thumb_cache:
+        return _vrm_thumb_cache[vrm_path]
+
+    pixmap = None
+    try:
+        import struct
+        import json as _json
+        with open(vrm_path, "rb") as f:
+            magic, _ver, _total = struct.unpack("<III", f.read(12))
+            if magic != 0x46546C67:  # 'glTF'
+                raise ValueError("not a GLB file")
+
+            clen, ctype = struct.unpack("<II", f.read(8))
+            if ctype != 0x4E4F534A:  # 'JSON'
+                raise ValueError("first chunk is not JSON")
+            jdata = _json.loads(f.read(clen))
+
+            clen2, ctype2 = struct.unpack("<II", f.read(8))
+            if ctype2 != 0x004E4942:  # 'BIN\0'
+                raise ValueError("second chunk is not BIN")
+            bin_data = f.read(clen2)
+
+        images = jdata.get("images", [])
+        textures = jdata.get("textures", [])
+        buffer_views = jdata.get("bufferViews", [])
+
+        def _img_bytes(img_idx: int) -> bytes | None:
+            img = images[img_idx] if img_idx < len(images) else None
+            if img is None:
+                return None
+            bv_idx = img.get("bufferView")
+            if bv_idx is None:
+                return None
+            bv = buffer_views[bv_idx]
+            offset = bv.get("byteOffset", 0)
+            length = bv.get("byteLength", 0)
+            return bin_data[offset : offset + length]
+
+        img_bytes = None
+        # VRM 0.x
+        vrm0 = jdata.get("extensions", {}).get("VRM", {})
+        tex_idx = vrm0.get("meta", {}).get("texture")
+        if tex_idx is not None and tex_idx < len(textures):
+            src = textures[tex_idx].get("source")
+            if src is not None:
+                img_bytes = _img_bytes(src)
+
+        # VRM 1.0
+        if img_bytes is None:
+            vrm1 = jdata.get("extensions", {}).get("VRMC_vrm", {})
+            img_idx = vrm1.get("meta", {}).get("thumbnailImage")
+            if img_idx is not None:
+                img_bytes = _img_bytes(img_idx)
+
+        if img_bytes:
+            from PyQt6.QtGui import QPixmap as _QPixmap
+            pm = _QPixmap()
+            pm.loadFromData(img_bytes)
+            if not pm.isNull():
+                pixmap = pm
+    except Exception:
+        pass
+
+    _vrm_thumb_cache[vrm_path] = pixmap
+    return pixmap
+
 
 def _copy_to_assets(src: str) -> str:
     """Copy *src* into the assets directory and return the destination path.
@@ -96,12 +174,16 @@ class _LayerItem(QGraphicsRectItem):
         self._resize_orig_rect: QRectF | None = None
         self._resize_orig_pos: QPointF | None = None
 
-        # Cache pixmap for image layers
+        # Cache pixmap: image layers load from file; avatar layers extract VRM thumbnail
         self._pixmap: QPixmap | None = None
         if layer.get("type") == "image":
-            p = layer.get("path", "")
+            p = layer.get("path", "") or layer.get("src", "")
             if p and Path(p).exists():
                 self._pixmap = QPixmap(p)
+        elif layer.get("type") == "avatar":
+            vrm = layer.get("vrm_path", "")
+            if vrm and Path(vrm).exists():
+                self._pixmap = _extract_vrm_thumbnail(vrm)
 
         layer_type = layer.get("type", "image")
         fill = QColor(_LAYER_COLORS.get(layer_type, "#2d2d4e"))
@@ -123,8 +205,8 @@ class _LayerItem(QGraphicsRectItem):
         r = self.rect()
         layer_type = self._layer.get("type", "image")
 
-        # Image preview — draw pixmap scaled to current rect
-        if layer_type == "image" and self._pixmap and not self._pixmap.isNull():
+        # Image / avatar thumbnail preview
+        if self._pixmap and not self._pixmap.isNull():
             painter.drawPixmap(r.toRect(), self._pixmap)
         else:
             # Fallback label for non-image or missing image

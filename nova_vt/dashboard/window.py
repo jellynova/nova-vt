@@ -294,13 +294,27 @@ class MainWindow(QMainWindow):
                 with open(scene_path, "r", encoding="utf-8") as f:
                     scene_data = json.load(f)
             except Exception:
-                scene_data = {"name": scene_name, "layers": []}
+                scene_data = self._default_scene(scene_name)
         else:
-            scene_data = {"name": scene_name, "layers": []}
+            scene_data = self._default_scene(scene_name)
 
         dlg = SceneEditorDialog(scene_data=scene_data, parent=self)
         if dlg.exec():
             dlg.save_scene(scene_path)
+
+    def _default_scene(self, scene_name: str) -> dict:
+        """Return a minimal scene with a full-canvas webcam capture layer."""
+        cam_device = self._config.get("camera", "device") or "/dev/video0"
+        vrm_path = self._config.get("renderer", "vrm_path") or ""
+        layers = [
+            {"type": "capture", "device": cam_device, "rect": [0, 0, 1920, 1080], "z": 0},
+        ]
+        if vrm_path:
+            # Avatar in the bottom-right quarter by default
+            layers.append(
+                {"type": "avatar", "vrm_path": vrm_path, "rect": [1440, 540, 480, 540], "z": 1}
+            )
+        return {"name": scene_name, "layers": layers}
 
     def closeEvent(self, event) -> None:
         self._preview_widget.stop()
