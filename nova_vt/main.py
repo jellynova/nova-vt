@@ -372,9 +372,22 @@ def main() -> None:
             from nova_vt.renderer.vrm_loader import VRMLoader
             from nova_vt.renderer.vrm_renderer import VRMRenderer
             loader = VRMLoader(candidate)
+            # Use the avatar layer's rect dimensions so the renderer produces
+            # frames at the right aspect ratio instead of always 1920x1080.
+            avatar_layer = next(
+                (l for l in scene_data.get("layers", []) if l.get("type") == "avatar"),
+                None,
+            )
+            if avatar_layer and avatar_layer.get("rect"):
+                _, _, rw, rh = avatar_layer["rect"]
+                render_w, render_h = max(rw, 64), max(rh, 64)
+            else:
+                render_w, render_h = 480, 540
             renderer = VRMRenderer(
                 loader=loader,
                 preview_queue=compositor.avatar_queue,
+                width=render_w,
+                height=render_h,
                 fps=30,
             )
             _vrm_renderer.append(renderer)
@@ -447,7 +460,32 @@ def main() -> None:
 
     def on_scene_changed(scene_name: str) -> None:
         _active_scene[0] = scene_name
-        compositor.set_scene(_load_scene_data(scene_name, camera_device))
+        scene = _load_scene_data(scene_name, camera_device)
+        compositor.set_scene(scene)
+        # Restart VRM renderer if the scene has a different avatar model
+        new_vrm = next(
+            (l.get("vrm_path", "") for l in scene.get("layers", [])
+             if l.get("type") == "avatar" and l.get("vrm_path")),
+            _config_vrm_path,
+        )
+        current_vrm = (_vrm_renderer[0]._loader._path if _vrm_renderer else None)
+        if new_vrm and str(current_vrm) != new_vrm:
+            if _vrm_renderer:
+                _vrm_renderer[0].stop()
+                _vrm_renderer[0].wait()
+                _vrm_renderer.clear()
+            if _tracker:
+                _tracker[0].stop()
+                _tracker[0].wait()
+                _tracker.clear()
+            _init_vrm_renderer(scene)
+            if _vrm_renderer:
+                tracker = MediaPipeTracker(camera_index=camera_device)
+                _tracker.clear()
+                _tracker.append(tracker)
+                tracker.frame_updated.connect(_vrm_renderer[0].update_tracking)
+                tracker.start()
+                _vrm_renderer[0].start()
 
     # ── Window ───────────────────────────────────────────────────────────
     from nova_vt.dashboard.window import MainWindow
