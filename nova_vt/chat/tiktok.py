@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from typing import Callable, Optional
 
 from nova_vt.chat.provider import ChatMessage
+
+_log = logging.getLogger(__name__)
 
 
 class TikTokChatProvider:
@@ -18,17 +21,17 @@ class TikTokChatProvider:
     def __init__(self) -> None:
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
         self._credentials: dict = {}
-        self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def connect(self, credentials: dict) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            _log.debug("TikTokChatProvider.connect() called while already connected — ignored")
+            return
         self._credentials = credentials
-        self._stop_event.clear()
         self._start_client()
 
     def disconnect(self) -> None:
-        self._stop_event.set()
         if self._loop is not None and not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -56,12 +59,13 @@ class TikTokChatProvider:
     def _handle_gift(self, event) -> None:
         if self._message_callback is None:
             return
+        gift_name = getattr(event.gift, "name", None) or "unknown gift"
         self._message_callback(
             ChatMessage(
                 platform="tiktok",
                 username=event.user.nickname,
                 color=self._TIKTOK_COLOR,
-                text=getattr(event.gift, "name", ""),
+                text=gift_name,
                 event_type="gift",
             )
         )
@@ -93,25 +97,23 @@ class TikTokChatProvider:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
 
-        provider_ref = self
-
         client = TikTokLiveClient(unique_id=username)
 
         @client.on(CommentEvent)
         async def on_comment(event: CommentEvent) -> None:
-            provider_ref._handle_chat(event)
+            self._handle_chat(event)
 
         @client.on(GiftEvent)
         async def on_gift(event: GiftEvent) -> None:
-            provider_ref._handle_gift(event)
+            self._handle_gift(event)
 
         @client.on(FollowEvent)
         async def on_follow(event: FollowEvent) -> None:
-            provider_ref._handle_follow(event)
+            self._handle_follow(event)
 
         try:
             self._loop.run_until_complete(client.start())
         except Exception:
-            pass
+            _log.exception("TikTokChatProvider: connection error for user %r", username)
         finally:
             self._loop.close()

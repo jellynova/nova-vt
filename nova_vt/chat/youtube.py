@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Callable, Optional
 
 from nova_vt.chat.provider import ChatMessage
+
+_log = logging.getLogger(__name__)
 
 
 class YouTubeChatProvider:
@@ -25,6 +28,9 @@ class YouTubeChatProvider:
         self._thread: Optional[threading.Thread] = None
 
     def connect(self, credentials: dict) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            _log.debug("YouTubeChatProvider.connect() called while already polling — ignored")
+            return
         self._credentials = credentials
         self._stop_event.clear()
         self._start_polling()
@@ -68,6 +74,7 @@ class YouTubeChatProvider:
                 self._parse_and_emit(items)
                 wait = max(self._poll_interval, api_interval_ms / 1000.0)
             except Exception:
+                _log.exception("YouTubeChatProvider: poll error for live_chat_id %r", live_chat_id)
                 wait = self._poll_interval
 
             self._stop_event.wait(timeout=wait)

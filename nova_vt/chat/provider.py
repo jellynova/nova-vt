@@ -15,7 +15,7 @@ class ChatMessage:
     username: str
     color: str       # hex color string, e.g. "#9147ff"
     text: str
-    event_type: str  # "message" | "sub" | "raid" | "gift"
+    event_type: str  # "message" | "sub" | "raid" | "gift" | "follow"
 
 
 # ---------------------------------------------------------------------------

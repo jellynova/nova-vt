@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from typing import Callable, Optional
 
 from nova_vt.chat.provider import ChatMessage
+
+_log = logging.getLogger(__name__)
 
 
 class TwitchChatProvider:
@@ -25,7 +28,6 @@ class TwitchChatProvider:
     def __init__(self) -> None:
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
         self._credentials: dict = {}
-        self._stop_event = threading.Event()
         self._pending_sends: list[str] = []
         self._sends_lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -33,12 +35,13 @@ class TwitchChatProvider:
         self._client = None  # twitchio.Client instance, set in _run_loop
 
     def connect(self, credentials: dict) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            _log.debug("TwitchChatProvider.connect() called while already connected — ignored")
+            return
         self._credentials = credentials
-        self._stop_event.clear()
         self._start_client()
 
     def disconnect(self) -> None:
-        self._stop_event.set()
         if self._loop is not None and not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -149,7 +152,10 @@ class TwitchChatProvider:
         try:
             self._loop.run_until_complete(_run())
         except Exception:
-            pass
+            _log.exception(
+                "TwitchChatProvider: connection error for broadcaster_user_id %r",
+                creds.get("broadcaster_user_id", ""),
+            )
         finally:
             self._loop.close()
 
